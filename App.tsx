@@ -2,10 +2,10 @@ import React, { useState } from 'react';
 import { FileUpload } from './components/FileUpload';
 import { DataTable } from './components/DataTable';
 import { ChatInterface } from './components/ChatInterface';
-import { parseExcelFile, fetchGoogleSheet } from './utils/excelParser';
+import { parseExcelFile } from './utils/excelParser';
 import { generateDataAnalysis } from './services/geminiService';
 import { ExcelData, ChatMessage, AppState } from './types';
-import { Table, MessageSquare, ArrowLeft, FileText, Menu, Github, X, BarChart, Database, Zap } from 'lucide-react';
+import { Table, MessageSquare, ArrowLeft, FileText, Menu, Github, X, BarChart } from 'lucide-react';
 
 const App: React.FC = () => {
   const [appState, setAppState] = useState<AppState>(AppState.UPLOAD);
@@ -16,28 +16,27 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'data' | 'chat'>('chat');
   const [showCredits, setShowCredits] = useState(false);
 
-  // Hardcoded Sheet ID for Carvuk Demo
-  const CARVUK_SHEET_ID = "11W-wGbHVoQ4YR4_HlHcckXRTNjsou2j8xEwWUy-GDk0";
-
-  const handleConnectDataSource = async () => {
+  const handleFileSelect = async (file: File) => {
     setIsProcessing(true);
     try {
-      const data = await fetchGoogleSheet(CARVUK_SHEET_ID);
+      const data = await parseExcelFile(file);
       setExcelData(data);
       setAppState(AppState.ANALYSIS);
       
+      // Calculate total stats
       const totalSheets = data.sheets.length;
+      const sheetNames = data.sheets.map(s => s.sheetName).join(', ');
       
-      // Initial greeting (UI only, filtered out from API history)
+      // Add initial greeting
       setMessages([{
         id: 'init',
         role: 'model',
-        content: `Hi! I've connected to the **Carvuk Demo Data**. \n\nI found **${totalSheets} sheets** ready for analysis. \n\nYou can ask me to analyze data from specific sheets or cross-reference data (e.g. "Calculate CAC" or "Show me ROAS trends").`,
+        content: `Hi! I've analyzed **${data.fileName}**. \n\nI found **${totalSheets} sheets**: ${sheetNames}. \n\nYou can ask me to analyze data from a specific sheet or cross-reference data between them (e.g., "Join data from Sheet A and Sheet B").`,
         timestamp: Date.now()
       }]);
     } catch (error) {
-      console.error("Connection Error", error);
-      alert("Failed to connect to Google Sheet. Please try again.");
+      console.error("Parse Error", error);
+      alert("Failed to parse Excel file. Please try again.");
     } finally {
       setIsProcessing(false);
     }
@@ -57,13 +56,11 @@ const App: React.FC = () => {
     setIsTyping(true);
 
     try {
-        // Prepare chat history for API, filtering out the UI-only init message
-        const history = messages
-            .filter(m => m.id !== 'init')
-            .map(m => ({
-                role: m.role === 'model' ? 'model' : 'user',
-                parts: [{ text: m.content }]
-            }));
+        // Prepare chat history for API
+        const history = messages.map(m => ({
+            role: m.role === 'model' ? 'model' : 'user',
+            parts: [{ text: m.content }]
+        }));
 
         const responseText = await generateDataAnalysis(text, excelData, history);
 
@@ -95,7 +92,7 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="h-screen w-full flex flex-col bg-slate-50 overflow-hidden relative">
+    <div className="h-screen w-full flex flex-col bg-slate-50 overflow-hidden relative font-inter">
       {/* Header */}
       <header className="bg-white border-b border-slate-200 flex-shrink-0 z-20 shadow-sm">
         <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
@@ -120,7 +117,7 @@ const App: React.FC = () => {
                 className="text-sm font-semibold text-slate-600 hover:text-slate-900 flex items-center gap-2 transition-colors px-4 py-2 rounded-lg hover:bg-slate-100"
                 >
                 <ArrowLeft size={18} />
-                <span className="hidden sm:inline">Disconnect</span>
+                <span className="hidden sm:inline">Upload New</span>
                 </button>
             )}
           </div>
@@ -135,52 +132,22 @@ const App: React.FC = () => {
              <div className="flex flex-col items-center justify-center min-h-[85%]">
                 <div className="text-center mb-12 max-w-2xl px-4">
                     <h2 className="text-4xl font-extrabold text-slate-900 mb-4 tracking-tight">
-                        Analytics Dashboard for <span className="text-indigo-600">Carvuk</span>
+                        Chat with your <span className="text-indigo-600">Spreadsheet</span>
                     </h2>
                     <p className="text-lg text-slate-500 leading-relaxed">
-                        Connect directly to your live Google Sheet data. Calculate CAC, ROAS, and visualize trends effortlessly with Gemini AI.
+                        Instant analysis for your Excel files. Calculate CAC, ROAS, and visualize trends effortlessly with Gemini AI.
                     </p>
                 </div>
                 
-                {/* Connection Card */}
-                <div className="w-full max-w-md bg-white rounded-3xl shadow-xl shadow-slate-200/60 border border-slate-100 overflow-hidden">
-                    <div className="bg-slate-50 px-8 py-6 border-b border-slate-100 flex items-center justify-center">
-                         <div className="w-16 h-16 bg-white rounded-2xl flex items-center justify-center shadow-sm">
-                            <Database className="w-8 h-8 text-indigo-600" />
-                         </div>
-                    </div>
-                    <div className="p-8 text-center">
-                        <h3 className="text-xl font-bold text-slate-900 mb-2">Connect Data Source</h3>
-                        <p className="text-sm text-slate-500 mb-8">
-                            Carvuk Demo Data (Google Sheets)
-                            <br />
-                            <span className="text-xs text-slate-400">ID: ...8xEwWUy-GDk0</span>
-                        </p>
-
-                        <button
-                            onClick={handleConnectDataSource}
-                            disabled={isProcessing}
-                            className="w-full py-4 bg-slate-900 text-white rounded-xl font-bold text-lg hover:bg-indigo-600 transition-all duration-300 shadow-lg hover:shadow-indigo-500/30 flex items-center justify-center gap-3 disabled:opacity-70 disabled:cursor-not-allowed group"
-                        >
-                            {isProcessing ? (
-                                <>Processing...</>
-                            ) : (
-                                <>
-                                    <Zap size={20} className="group-hover:text-yellow-300 transition-colors" />
-                                    Connect & Analyze
-                                </>
-                            )}
-                        </button>
-                    </div>
-                </div>
+                <FileUpload onFileSelect={handleFileSelect} isLoading={isProcessing} />
                 
                 <div className="mt-20 grid grid-cols-1 md:grid-cols-3 gap-8 max-w-5xl w-full text-center px-4 pb-10">
                     <div className="p-8 bg-white rounded-2xl shadow-sm border border-slate-100 hover:shadow-md transition-shadow">
                         <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-6">
-                            <Database size={24} />
+                            <FileText size={24} />
                         </div>
-                        <h3 className="text-lg font-bold text-slate-900 mb-3">1. Connect Data</h3>
-                        <p className="text-slate-500">Securely fetch data from Google Sheets.</p>
+                        <h3 className="text-lg font-bold text-slate-900 mb-3">1. Upload Excel</h3>
+                        <p className="text-slate-500">Securely drag & drop your .xlsx or .xls files.</p>
                     </div>
                     <div className="p-8 bg-white rounded-2xl shadow-sm border border-slate-100 hover:shadow-md transition-shadow">
                         <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-6">
@@ -267,12 +234,8 @@ const App: React.FC = () => {
                     </button>
                 </div>
                 <div className="px-8 pb-10 text-center flex flex-col items-center">
-                    <div className="w-24 h-24 bg-gradient-to-br from-indigo-600 to-blue-700 rounded-3xl flex items-center justify-center text-white mb-6 shadow-xl shadow-indigo-200 transform -rotate-3 overflow-hidden border-4 border-white">
-                         <img 
-                            src="https://github.com/catalvarezs.png" 
-                            alt="Catalina Alvarez" 
-                            className="w-full h-full object-cover"
-                         />
+                    <div className="w-20 h-20 bg-gradient-to-br from-indigo-600 to-blue-700 rounded-3xl flex items-center justify-center text-white mb-6 shadow-xl shadow-indigo-200 transform -rotate-3">
+                         <span className="text-2xl font-bold">CA</span>
                     </div>
                     <h4 className="text-2xl font-bold text-slate-900 mb-1 tracking-tight">Prueba Técnica</h4>
                     <p className="text-lg font-semibold text-indigo-600 mb-4">Growth Engineer</p>

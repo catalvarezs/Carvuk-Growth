@@ -1,42 +1,52 @@
 import * as XLSX from 'xlsx';
 import { ExcelData, ExcelRow, SheetData } from '../types';
 
-const processWorkbook = (workbook: XLSX.WorkBook, fileName: string): ExcelData => {
-  const parsedSheets: SheetData[] = [];
-
-  // Iterate through all sheets
-  workbook.SheetNames.forEach(sheetName => {
-    const worksheet = workbook.Sheets[sheetName];
+export const fetchGoogleSheet = async (sheetId: string): Promise<ExcelData> => {
+  try {
+    // Construct the CSV export URL for the Google Sheet
+    const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv`;
     
-    // Parse to JSON with raw: false to get formatted strings (e.g. "$1,000" instead of 1000)
-    // This helps the LLM understand the nature of the data better (currency, percentage, dates)
-    const jsonData = XLSX.utils.sheet_to_json<ExcelRow>(worksheet, { 
-      header: 0, 
-      defval: "",
-      raw: false 
+    const response = await fetch(csvUrl);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch Google Sheet: ${response.statusText}`);
+    }
+
+    const csvData = await response.text();
+    
+    // Parse CSV data using XLSX
+    const workbook = XLSX.read(csvData, { type: 'string' });
+    const parsedSheets: SheetData[] = [];
+
+    workbook.SheetNames.forEach(sheetName => {
+      const worksheet = workbook.Sheets[sheetName];
+      const jsonData = XLSX.utils.sheet_to_json<ExcelRow>(worksheet, {
+        header: 0,
+        defval: "",
+        raw: false
+      });
+
+      if (jsonData.length > 0) {
+        const columns = Object.keys(jsonData[0]);
+        parsedSheets.push({
+          sheetName: sheetName,
+          columns: columns,
+          rows: jsonData
+        });
+      }
     });
 
-    // Only add non-empty sheets
-    if (jsonData.length > 0) {
-      // Extract columns from the first row keys
-      const columns = Object.keys(jsonData[0]);
-      
-      parsedSheets.push({
-        sheetName: sheetName,
-        columns: columns,
-        rows: jsonData
-      });
+    if (parsedSheets.length === 0) {
+      throw new Error("Google Sheet appears to be empty or has no readable data");
     }
-  });
 
-  if (parsedSheets.length === 0) {
-      throw new Error("Excel file appears to be empty or has no readable data");
+    return {
+      fileName: `Sheet_${sheetId}`,
+      sheets: parsedSheets
+    };
+  } catch (error) {
+    console.error("Error fetching Google Sheet:", error);
+    throw error;
   }
-
-  return {
-    fileName: fileName,
-    sheets: parsedSheets
-  };
 };
 
 export const parseExcelFile = async (file: File): Promise<ExcelData> => {
@@ -53,8 +63,42 @@ export const parseExcelFile = async (file: File): Promise<ExcelData> => {
 
         // Parse with cellDates: true to handle date fields correctly if they aren't strings
         const workbook = XLSX.read(data, { type: 'array', cellDates: true });
-        
-        resolve(processWorkbook(workbook, file.name));
+        const parsedSheets: SheetData[] = [];
+
+        // Iterate through all sheets
+        workbook.SheetNames.forEach(sheetName => {
+          const worksheet = workbook.Sheets[sheetName];
+          
+          // Parse to JSON with raw: false to get formatted strings (e.g. "$1,000" instead of 1000)
+          // This helps the LLM understand the nature of the data better (currency, percentage, dates)
+          const jsonData = XLSX.utils.sheet_to_json<ExcelRow>(worksheet, { 
+            header: 0, 
+            defval: "",
+            raw: false 
+          });
+
+          // Only add non-empty sheets
+          if (jsonData.length > 0) {
+            // Extract columns from the first row keys
+            const columns = Object.keys(jsonData[0]);
+            
+            parsedSheets.push({
+              sheetName: sheetName,
+              columns: columns,
+              rows: jsonData
+            });
+          }
+        });
+
+        if (parsedSheets.length === 0) {
+            reject(new Error("Excel file appears to be empty or has no readable data"));
+            return;
+        }
+
+        resolve({
+          fileName: file.name,
+          sheets: parsedSheets
+        });
       } catch (error) {
         reject(error);
       }
@@ -63,22 +107,4 @@ export const parseExcelFile = async (file: File): Promise<ExcelData> => {
     reader.onerror = (error) => reject(error);
     reader.readAsArrayBuffer(file);
   });
-};
-
-export const fetchGoogleSheet = async (sheetId: string): Promise<ExcelData> => {
-  const url = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=xlsx`;
-  
-  try {
-    const response = await fetch(url);
-    if (!response.ok) {
-        throw new Error("Failed to fetch Google Sheet. Ensure it is public.");
-    }
-    const arrayBuffer = await response.arrayBuffer();
-    const workbook = XLSX.read(arrayBuffer, { type: 'array', cellDates: true });
-    
-    return processWorkbook(workbook, "Google Sheet Data");
-  } catch (error) {
-    console.error("Fetch Google Sheet Error:", error);
-    throw error;
-  }
 };
